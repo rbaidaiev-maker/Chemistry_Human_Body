@@ -776,10 +776,36 @@ function attachExperiment(){
 
   // Touch / pointer based drag fallback (works on mobile, incl. iOS Safari)
   let dragGhost = null, dragging = false, activePointerId = null;
+  let lastPointerY = null, autoScrollRAF = null;
+
+  const AUTOSCROLL_EDGE = 90;   // px from top/bottom of the viewport that triggers scrolling
+  const AUTOSCROLL_MAX_SPEED = 16; // px per animation frame at the very edge
+
+  function getScrollableSlide(){
+    return document.querySelector('.slide.active');
+  }
+
+  function autoScrollTick(){
+    if(!dragging || lastPointerY===null){ autoScrollRAF = null; return; }
+    const slideEl = getScrollableSlide();
+    if(slideEl){
+      const vh = window.innerHeight;
+      if(lastPointerY < AUTOSCROLL_EDGE){
+        const speed = AUTOSCROLL_MAX_SPEED * (1 - lastPointerY/AUTOSCROLL_EDGE);
+        slideEl.scrollTop -= speed;
+      } else if(lastPointerY > vh - AUTOSCROLL_EDGE){
+        const speed = AUTOSCROLL_MAX_SPEED * (1 - (vh-lastPointerY)/AUTOSCROLL_EDGE);
+        slideEl.scrollTop += speed;
+      }
+    }
+    autoScrollRAF = requestAnimationFrame(autoScrollTick);
+  }
 
   function cleanupDrag(){
     dragging = false;
     activePointerId = null;
+    lastPointerY = null;
+    if(autoScrollRAF){ cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null; }
     if(dragGhost){ dragGhost.remove(); dragGhost = null; }
     document.querySelectorAll('.sample-card').forEach(c=>c.classList.remove('dragover'));
     dock.classList.remove('dragging-src');
@@ -799,6 +825,7 @@ function attachExperiment(){
     e.preventDefault();
     dragging = true;
     activePointerId = e.pointerId;
+    lastPointerY = e.clientY;
     dock.classList.add('dragging-src');
     try{ dropperSvg.setPointerCapture(e.pointerId); }catch(err){ /* ignore capture failures on some iOS versions */ }
     dragGhost = dropperSvg.cloneNode(true);
@@ -811,10 +838,12 @@ function attachExperiment(){
     dragGhost.style.left=(e.clientX-30)+'px';
     dragGhost.style.top=(e.clientY-30)+'px';
     document.body.appendChild(dragGhost);
+    if(!autoScrollRAF) autoScrollRAF = requestAnimationFrame(autoScrollTick);
   });
   dropperSvg.addEventListener('pointermove', (e)=>{
     if(!dragging || e.pointerId!==activePointerId) return;
     e.preventDefault();
+    lastPointerY = e.clientY;
     if(dragGhost){
       dragGhost.style.left=(e.clientX-30)+'px';
       dragGhost.style.top=(e.clientY-30)+'px';
