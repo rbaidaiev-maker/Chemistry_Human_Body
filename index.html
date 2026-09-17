@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
-<title>STEM 7 · Урок 6 · Я, моє тіло, здорове харчування. Хімія людського організму</title>
+<title>6. STEM 7 · Урок 6 · Я, моє тіло, здорове харчування. Хімія людського організму</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/js/all.min.js"></script>
@@ -153,7 +153,7 @@ table.roles-table th{font-family:var(--font-mono);text-transform:uppercase;font-
 .lab-wrap{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start;margin-top:10px;}
 .dropper-dock{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--surface-2);border:2px dashed var(--border);border-radius:16px;padding:16px 18px;}
 .dropper-dock.dragging-src{border-color:var(--accent);}
-.dropper-icon{width:74px;height:auto;cursor:grab;touch-action:none;filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));user-select:none;-webkit-user-drag:element;}
+.dropper-icon{width:74px;height:auto;cursor:grab;touch-action:none;filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));user-select:none;-webkit-user-drag:none;-webkit-touch-callout:none;}
 .dropper-icon:active{cursor:grabbing;}
 .dropper-label{font-family:var(--font-mono);font-size:.7rem;color:var(--ink-faint);text-align:center;max-width:110px;}
 .samples-grid{flex:1;min-width:280px;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:14px;}
@@ -346,6 +346,8 @@ function renderAllSlides(){
 
 function goTo(i){
   if(i<0) i=0; if(i>=slides.length) i=slides.length-1;
+  // safety net: remove any stuck drag-ghost element left over from an interrupted touch drag
+  document.querySelectorAll('.__dropper-ghost').forEach(g=>g.remove());
   current = i;
   lsSet('currentSlide', current);
   slides.forEach((s,idx)=>{
@@ -772,13 +774,36 @@ function attachExperiment(){
     });
   });
 
-  // Touch / pointer based drag fallback (works on mobile)
-  let dragGhost = null, dragging = false;
+  // Touch / pointer based drag fallback (works on mobile, incl. iOS Safari)
+  let dragGhost = null, dragging = false, activePointerId = null;
+
+  function cleanupDrag(){
+    dragging = false;
+    activePointerId = null;
+    if(dragGhost){ dragGhost.remove(); dragGhost = null; }
+    document.querySelectorAll('.sample-card').forEach(c=>c.classList.remove('dragover'));
+    dock.classList.remove('dragging-src');
+  }
+
+  function pointOverCard(x, y){
+    let found = null;
+    document.querySelectorAll('.sample-card').forEach(c=>{
+      const r = c.getBoundingClientRect();
+      if(x>=r.left && x<=r.right && y>=r.top && y<=r.bottom) found = c;
+    });
+    return found;
+  }
+
   dropperSvg.addEventListener('pointerdown', (e)=>{
     if(e.pointerType==='mouse') return; // mouse uses native DnD above
+    e.preventDefault();
     dragging = true;
-    dropperSvg.setPointerCapture(e.pointerId);
+    activePointerId = e.pointerId;
+    dock.classList.add('dragging-src');
+    try{ dropperSvg.setPointerCapture(e.pointerId); }catch(err){ /* ignore capture failures on some iOS versions */ }
     dragGhost = dropperSvg.cloneNode(true);
+    dragGhost.removeAttribute('id');
+    dragGhost.classList.add('__dropper-ghost');
     dragGhost.style.position='fixed';
     dragGhost.style.width='60px';
     dragGhost.style.zIndex='999';
@@ -788,26 +813,34 @@ function attachExperiment(){
     document.body.appendChild(dragGhost);
   });
   dropperSvg.addEventListener('pointermove', (e)=>{
-    if(!dragging || !dragGhost) return;
-    dragGhost.style.left=(e.clientX-30)+'px';
-    dragGhost.style.top=(e.clientY-30)+'px';
+    if(!dragging || e.pointerId!==activePointerId) return;
+    e.preventDefault();
+    if(dragGhost){
+      dragGhost.style.left=(e.clientX-30)+'px';
+      dragGhost.style.top=(e.clientY-30)+'px';
+    }
     document.querySelectorAll('.sample-card').forEach(c=>{
       const r = c.getBoundingClientRect();
       const over = e.clientX>=r.left && e.clientX<=r.right && e.clientY>=r.top && e.clientY<=r.bottom;
       c.classList.toggle('dragover', over);
     });
   });
-  dropperSvg.addEventListener('pointerup', (e)=>{
-    if(!dragging) return;
-    dragging = false;
-    if(dragGhost) dragGhost.remove();
-    document.querySelectorAll('.sample-card').forEach(c=>{
-      const r = c.getBoundingClientRect();
-      const over = e.clientX>=r.left && e.clientX<=r.right && e.clientY>=r.top && e.clientY<=r.bottom;
-      c.classList.remove('dragover');
-      if(over) reactSample(c.dataset.id);
-    });
-  });
+  function finishDrag(e, shouldReact){
+    if(!dragging || (activePointerId!==null && e.pointerId!==activePointerId)) return;
+    const card = shouldReact ? pointOverCard(e.clientX, e.clientY) : null;
+    cleanupDrag();
+    if(card) reactSample(card.dataset.id);
+  }
+  dropperSvg.addEventListener('pointerup', (e)=> finishDrag(e, true));
+  // iOS Safari sometimes fires pointercancel instead of pointerup (system gestures,
+  // multi-touch, or momentarily losing pointer capture) — without this the ghost
+  // icon would freeze on screen. Also guard with lostpointercapture as a second net.
+  dropperSvg.addEventListener('pointercancel', (e)=> finishDrag(e, false));
+  dropperSvg.addEventListener('lostpointercapture', (e)=>{ if(dragging) finishDrag(e, false); });
+  // Absolute safety net: if anything above fails to fire, a pointerup/cancel anywhere
+  // on the page still cleans up so the dropper never stays stuck mid-drag.
+  window.addEventListener('pointerup', (e)=>{ if(dragging) finishDrag(e, true); }, true);
+  window.addEventListener('pointercancel', ()=>{ if(dragging) cleanupDrag(); }, true);
 
   document.querySelectorAll('.verdict-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
