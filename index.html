@@ -293,7 +293,7 @@ const SAMPLES = [
   {id:'bread', name:'Хліб', img:IMG.bread, starch:true, origin:'plant'},
   {id:'potato', name:'Варена картопля', img:IMG.potato, starch:true, origin:'plant'},
   {id:'rice', name:'Варений рис', img:IMG.rice, starch:true, origin:'plant'},
-  {id:'apple', name:'Яблуко', img:IMG.apple, starch:false, origin:'plant'},
+  {id:'apple', name:'Яблуко', img:IMG.apple, starch:true, weak:true, origin:'plant'},
   {id:'cucumber', name:'Огірок', img:IMG.cucumber, starch:false, origin:'plant'}
 ];
 /* Додаткові (позапротокольні) зразки тваринного походження — лише для наочної демонстрації
@@ -452,7 +452,7 @@ function makeTimer(container, seconds, label){
 
 /* ---------- SVG helpers (simple flat icons, theme-aware via CSS vars) ---------- */
 function svgDropperIcon(){
-  return `<svg viewBox="0 0 100 140" xmlns="http://www.w3.org/2000/svg" class="dropper-icon" id="dropperSvg" draggable="true">
+  return `<svg viewBox="0 0 100 140" xmlns="http://www.w3.org/2000/svg" class="dropper-icon" id="dropperSvg">
     <ellipse cx="50" cy="132" rx="14" ry="6" fill="#000" opacity=".12"/>
     <rect x="30" y="10" width="40" height="18" rx="4" fill="#3a2a1a"/>
     <rect x="38" y="0" width="24" height="14" rx="3" fill="#20140c"/>
@@ -687,12 +687,21 @@ function renderExperiment(){
   </div>`;
 }
 
+// яблуко (weak) містить крохмаль, але менше — пляма синя, проте світліша й менша
+function stainColorOf(s){
+  if(s.weak) return 'radial-gradient(circle at 50% 45%, #1f3f8f 0%, #2d55b0 30%, rgba(45,85,176,0) 62%)';
+  return s.starch ? 'radial-gradient(circle at 50% 45%, #0b1c3e 0%, #12234a 40%, rgba(18,35,74,0) 72%)'
+                  : 'radial-gradient(circle at 50% 45%, #8a5a1a 0%, #9c6a22 30%, rgba(156,106,34,0) 68%)';
+}
+function stainTextOf(s){
+  if(s.weak) return 'посиніло (крохмалю менше)';
+  return s.starch ? 'яскраво синьо-чорний!' : 'колір майже не змінився';
+}
+
 function renderSampleCard(s, res){
   res = res || {tested:false, verdict:null};
-  const stainColor = s.starch ? 'radial-gradient(circle at 50% 45%, #0b1c3e 0%, #12234a 40%, rgba(18,35,74,0) 72%)'
-                               : 'radial-gradient(circle at 50% 45%, #8a5a1a 0%, #9c6a22 30%, rgba(156,106,34,0) 68%)';
-  const statusText = !res.tested ? 'ще не тестовано'
-    : (s.starch ? 'яскраво синьо-чорний!' : 'колір майже не змінився');
+  const stainColor = stainColorOf(s);
+  const statusText = !res.tested ? 'ще не тестовано' : stainTextOf(s);
   const statusClass = !res.tested ? '' : (s.starch ? 'pos' : 'neg');
   return `<div class="sample-card ${res.tested?'tested':''}" id="card-${s.id}" data-id="${s.id}" data-starch="${s.starch}">
     <div class="sample-photo" id="photo-${s.id}">
@@ -728,7 +737,7 @@ function reactSample(id){
     card.classList.add('tested');
     setExpResult(id, {tested:true});
     const statusEl = document.getElementById('status-'+id);
-    statusEl.textContent = sample.starch ? 'яскраво синьо-чорний!' : 'колір майже не змінився';
+    statusEl.textContent = stainTextOf(sample);
     statusEl.className = 'sample-status ' + (sample.starch?'pos':'neg');
     card.querySelectorAll('.verdict-btn').forEach(b=>b.disabled=false);
     drop.remove();
@@ -753,28 +762,7 @@ function attachExperiment(){
   const timerBox = document.getElementById('expTimerBox');
   if(timerBox) makeTimer(timerBox, 12*60, 'Час на дослід (5.5 сценарію)');
 
-  // Desktop drag & drop (native HTML5 DnD)
-  dropperSvg.addEventListener('dragstart', (e)=>{
-    e.dataTransfer.setData('text/plain','iodine');
-    dock.classList.add('dragging-src');
-  });
-  dropperSvg.addEventListener('dragend', ()=> dock.classList.remove('dragging-src'));
-
-  document.querySelectorAll('.sample-card').forEach(card=>{
-    card.addEventListener('dragover', (e)=>{ e.preventDefault(); card.classList.add('dragover'); });
-    card.addEventListener('dragleave', ()=> card.classList.remove('dragover'));
-    card.addEventListener('drop', (e)=>{
-      e.preventDefault();
-      card.classList.remove('dragover');
-      reactSample(card.dataset.id);
-    });
-    // simple click/tap fallback for touch devices without full DnD
-    card.addEventListener('click', ()=>{
-      if(window.__lastPointerWasDropperDrag) return;
-    });
-  });
-
-  // Touch / pointer based drag fallback (works on mobile, incl. iOS Safari)
+  // Pointer-based drag for mouse, touch and pen (native HTML5 DnD does not work on <svg>)
   let dragGhost = null, dragging = false, activePointerId = null;
   let lastPointerY = null, autoScrollRAF = null;
 
@@ -821,7 +809,7 @@ function attachExperiment(){
   }
 
   dropperSvg.addEventListener('pointerdown', (e)=>{
-    if(e.pointerType==='mouse') return; // mouse uses native DnD above
+    if(e.pointerType==='mouse' && e.button!==0) return;
     e.preventDefault();
     dragging = true;
     activePointerId = e.pointerId;
@@ -897,11 +885,11 @@ function renderProtocol(){
   const allTested = SAMPLES.every(s=>results[s.id] && results[s.id].tested);
   const rows = SAMPLES.map(s=>{
     const r = results[s.id] || {tested:false, verdict:null};
-    const colorText = !r.tested ? '—' : (s.starch ? 'яскраво синьо-чорний' : 'колір майже не змінився (жовто-коричневий)');
+    const colorText = !r.tested ? '—' : (s.weak ? 'синій, світліший ніж на хлібі' : (s.starch ? 'яскраво синьо-чорний' : 'колір майже не змінився (жовто-коричневий)'));
     const colorClass = !r.tested ? '' : (s.starch?'pos':'neg');
     const verdictText = r.verdict==='yes' ? 'Є крохмаль' : (r.verdict==='no' ? 'Немає крохмалю' : '—');
     return `<tr>
-      <td><span class="mini-swatch" style="background:${s.starch?'#12234a':'#c98a2e'}"></span>${s.name}</td>
+      <td><span class="mini-swatch" style="background:${s.weak?'#2d55b0':(s.starch?'#12234a':'#c98a2e')}"></span>${s.name}</td>
       <td class="color-cell ${colorClass}">${colorText}</td>
       <td>${verdictText}</td>
     </tr>`;
@@ -922,7 +910,7 @@ function renderProtocol(){
     ${!allTested ? `<div class="online-note"><i class="fa-solid fa-triangle-exclamation"></i><div><b>Незаповнено</b>Поверніться на слайд «Груповий дослід» і протестуйте всі 5 зразків — таблиця заповнюється автоматично.</div></div>` : ''}
     <div class="card" style="margin-top:14px;">
       <label class="field-label">Письмовий висновок групи</label>
-      <textarea id="protocolConclusion" rows="3" placeholder="Наприклад: продукти рослинного походження з великим вмістом крохмалю (хліб, картопля, рис) дали яскраву синьо-чорну реакцію з йодом, а яблуко й огірок майже не змінили колір — отже, крохмалю в них значно менше або немає.">${conclusion}</textarea>
+      <textarea id="protocolConclusion" rows="3" placeholder="Наприклад: продукти рослинного походження з великим вмістом крохмалю (хліб, картопля, рис) дали яскраву синьо-чорну реакцію з йодом, яблуко посиніло слабше — крохмалю в ньому менше, а огірок майже не змінив колір — крохмалю в ньому немає.">${conclusion}</textarea>
       <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <button class="btn primary" id="saveConclusionBtn" type="button"><i class="fa-solid fa-floppy-disk"></i> Зберегти висновок</button>
         <span id="protocolSaveStatus" style="font-size:.8rem;color:var(--ink-faint);"></span>
